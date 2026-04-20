@@ -1,0 +1,1513 @@
+# ============================================================
+# PROJECT INIT FILE — IoMT Anomaly Detection System
+# ============================================================
+# This file is the single source of truth for all agents.
+# Read this COMPLETELY before touching any file in the project.
+# ============================================================
+
+PROJECT: IoMT (Internet of Medical Things) Anomaly Detection System
+OBJECTIVE: Build a production-grade multi-model AI system for real-time anomaly detection in medical IoT devices
+STATUS: In Progress — Core models (TFT, CNN) will be trained on Kaggle and provided later
+
+# ============================================================
+# SYSTEM ARCHITECTURE OVERVIEW
+# ============================================================
+
+This is a MODULAR, PARALLEL-EXECUTABLE system with 3 AI models:
+
+1. TFT (Temporal Fusion Transformer) — Time-series forecasting
+   - INPUT: sequence_length = 30 timesteps
+   - FEATURES: [heart_rate, temperature] (2 features only)
+   - OUTPUT: anomaly score [0.0-1.0]
+   - STATUS: Will be trained on Kaggle, model file provided later
+
+2. CNN (ResNet50) — Image classification
+   - INPUT: 224x224 RGB image
+   - OUTPUT: anomaly score [0.0-1.0]
+   - STATUS: Will be trained on Kaggle, model file provided later
+
+3. Edge Model (Isolation Forest) — Real-time anomaly detection
+   - INPUT: single row vector [heart_rate, temperature]
+   - OUTPUT: anomaly score [0.0-1.0]
+   - STATUS: To be trained locally by agents
+
+These models run INDEPENDENTLY and their outputs are FUSED to produce a final decision.
+
+The system supports:
+- Core models (TFT, CNN): Pre-trained on Kaggle, deployed locally
+- Edge model: Trained locally on processed data
+- Real-time inference (local CPU/edge device)
+- REST API deployment (FastAPI)
+- Parallel agent execution (multiple agents can work simultaneously)
+
+# ============================================================
+# MODEL INPUT SPECIFICATIONS (CRITICAL - DO NOT DEVIATE)
+# ============================================================
+
+TFT MODEL:
+──────────
+Input shape: (batch_size, 30, 2)
+  - 30 = sequence length (last 30 timesteps)
+  - 2 = features [heart_rate, temperature]
+Features:
+  - heart_rate: float, range [40-200] bpm
+  - temperature: float, range [35-42] Celsius
+Preprocessing:
+  - Z-score normalization per feature
+  - No missing values allowed
+Output:
+  - anomaly_score: float [0.0-1.0]
+
+CNN MODEL:
+──────────
+Input shape: (batch_size, 3, 224, 224)
+  - 3 = RGB channels
+  - 224x224 = image dimensions
+Preprocessing:
+  - Resize to 224x224
+  - Normalize: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225] (ImageNet stats)
+Output:
+  - anomaly_score: float [0.0-1.0]
+
+EDGE MODEL:
+───────────
+Input shape: (1, 2)
+  - Single row vector
+  - 2 = features [heart_rate, temperature]
+Features:
+  - heart_rate: float, range [40-200] bpm
+  - temperature: float, range [35-42] Celsius
+Preprocessing:
+  - Same Z-score normalization as TFT (use same scaler)
+Output:
+  - anomaly_score: float [0.0-1.0]
+
+# ============================================================
+# PARALLEL WORK PLAN — AGENT TASK ASSIGNMENTS
+# ============================================================
+# Each task is numbered and can be executed in parallel.
+# Dependencies are clearly marked.
+# Agents should claim a task number and work independently.
+# ============================================================
+
+PHASE 1: FOUNDATION (No dependencies - all parallel)
+═════════════════════════════════════════════════════
+
+TASK 1: Create config.py
+─────────────────────────
+AGENT: Config Agent
+DEPENDENCIES: None
+PRIORITY: HIGH (other tasks need this)
+DELIVERABLE: config.py
+
+Contents:
+- All file paths (data/, models/, images/, logs/)
+- Model hyperparameters (sequence_length=30, features=[heart_rate, temp])
+- Fusion weights (w_tft=0.4, w_cnn=0.3, w_edge=0.3)
+- Thresholds (NORMAL_THRESHOLD=0.4, CRITICAL_THRESHOLD=0.7)
+- Logging configuration
+- API configuration (host, port)
+- Normalization parameters (mean, std for each feature)
+
+TASK 2: Create requirements.txt
+────────────────────────────────
+AGENT: Dependencies Agent
+DEPENDENCIES: None
+PRIORITY: HIGH
+DELIVERABLE: requirements.txt
+
+Include all packages listed in ENVIRONMENT section below.
+
+TASK 3: Create directory structure
+───────────────────────────────────
+AGENT: Structure Agent
+DEPENDENCIES: None
+PRIORITY: HIGH
+DELIVERABLE: Create folders if not exist:
+- data/
+- data/logs/
+- models/
+- images/ (optional)
+
+TASK 4: Create __init__.py files
+─────────────────────────────────
+AGENT: Structure Agent
+DEPENDENCIES: None
+PRIORITY: MEDIUM
+DELIVERABLE: Empty __init__.py in:
+- data_pipeline/__init__.py
+- tft_model/__init__.py
+- cnn_model/__init__.py
+- edge_model/__init__.py
+- fusion/__init__.py
+- api/__init__.py
+
+═════════════════════════════════════════════════════
+PHASE 2: DATA PIPELINE (Sequential within, parallel to other phases)
+═════════════════════════════════════════════════════
+
+TASK 5: data_pipeline/load_data.py
+───────────────────────────────────
+AGENT: Data Pipeline Agent 1
+DEPENDENCIES: TASK 1 (config.py)
+PRIORITY: HIGH
+DELIVERABLE: data_pipeline/load_data.py
+
+Functionality:
+- Read healthcare_iot_target_dataset.csv
+- Validate columns: heart_rate, temperature, timestamp
+- Handle missing values (forward fill)
+- Save to data/raw_loaded.csv
+- CLI: --input <path> --output <path>
+- Logging to data/logs/data_pipeline.log
+
+TASK 6: data_pipeline/preprocess.py
+────────────────────────────────────
+AGENT: Data Pipeline Agent 2
+DEPENDENCIES: TASK 1 (config.py), TASK 5 (load_data.py must be done first)
+PRIORITY: HIGH
+DELIVERABLE: data_pipeline/preprocess.py
+
+Functionality:
+- Read data/raw_loaded.csv
+- Extract ONLY heart_rate and temperature columns
+- Z-score normalization (calculate mean, std, save to config or pickle)
+- Sort by timestamp
+- Create sequences of length 30 (sliding window)
+- Save to data/preprocessed.csv
+- CLI: --input <path> --output <path>
+- Logging to data/logs/data_pipeline.log
+
+TASK 7: data_pipeline/save_processed.py
+────────────────────────────────────────
+AGENT: Data Pipeline Agent 3
+DEPENDENCIES: TASK 6 (preprocess.py must be done first)
+PRIORITY: HIGH
+DELIVERABLE: data_pipeline/save_processed.py
+
+Functionality:
+- Read data/preprocessed.csv
+- Final validation (check shape, no NaN, correct columns)
+- Save to data/processed_vitals.csv ← SHARED ARTIFACT
+- Log statistics (mean, std, min, max, count)
+- CLI: --input <path> --output <path>
+- Logging to data/logs/data_pipeline.log
+
+═════════════════════════════════════════════════════
+PHASE 3: MODEL INFERENCE MODULES (All parallel)
+═════════════════════════════════════════════════════
+
+TASK 8: tft_model/inference.py
+───────────────────────────────
+AGENT: TFT Agent
+DEPENDENCIES: TASK 1 (config.py)
+PRIORITY: HIGH
+DELIVERABLE: tft_model/inference.py
+
+Functionality:
+- Load models/tft_model.pth (will be provided later from Kaggle)
+- Input: numpy array shape (30, 2) or CSV with 30 rows
+- Preprocess: apply same normalization as training
+- Predict: anomaly score [0.0-1.0]
+- CLI: --model <path> --input <path> --output <path>
+- Function: def predict_tft(input_data) -> float
+- Logging to data/logs/tft_inference.log
+
+NOTE: Model file will be provided later. For now, create inference code
+that assumes model exists. Add error handling if model not found.
+
+TASK 9: cnn_model/inference.py
+───────────────────────────────
+AGENT: CNN Agent
+DEPENDENCIES: TASK 1 (config.py)
+PRIORITY: HIGH
+DELIVERABLE: cnn_model/inference.py
+
+Functionality:
+- Load models/cnn_model.pth (will be provided later from Kaggle)
+- Input: image path (JPG/PNG)
+- Preprocess: resize to 224x224, normalize (ImageNet stats)
+- Predict: anomaly score [0.0-1.0]
+- CLI: --model <path> --input <image_path> --output <path>
+- Function: def predict_cnn(image_path) -> float
+- Logging to data/logs/cnn_inference.log
+
+NOTE: Model file will be provided later. For now, create inference code
+that assumes model exists. Add error handling if model not found.
+
+TASK 10: edge_model/isolation_forest.py
+────────────────────────────────────────
+AGENT: Edge Model Agent
+DEPENDENCIES: TASK 1 (config.py), TASK 7 (processed data)
+PRIORITY: HIGH
+DELIVERABLE: edge_model/isolation_forest.py
+
+Functionality:
+TWO MODES:
+
+1. TRAINING MODE (--mode train):
+   - Load data/processed_vitals.csv
+   - Extract heart_rate and temperature columns
+   - Train IsolationForest (n_estimators=100, contamination=0.1)
+   - Save models/isolation_forest.pkl
+   - Save scaler (same as preprocessing) to models/scaler.pkl
+   - Logging to data/logs/edge_training.log
+
+2. INFERENCE MODE (--mode infer):
+   - Load models/isolation_forest.pkl
+   - Input: single row [heart_rate, temperature]
+   - Preprocess: apply scaler
+   - Predict: anomaly score [0.0-1.0]
+   - Return: float
+
+CLI:
+  Training:  --data <path> --mode train --output models/isolation_forest.pkl
+  Inference: --data <path> --mode infer --model <path>
+
+Function: def predict_edge(input_row) -> float
+
+═════════════════════════════════════════════════════
+PHASE 4: FUSION & API (Depends on Phase 3)
+═════════════════════════════════════════════════════
+
+TASK 11: fusion/fusion_logic.py
+────────────────────────────────
+AGENT: Fusion Agent
+DEPENDENCIES: TASK 1 (config.py)
+PRIORITY: MEDIUM
+DELIVERABLE: fusion/fusion_logic.py
+
+Functionality:
+- Input: tft_score, cnn_score, edge_score (floats 0-1)
+- Load weights from config.py
+- Calculate weighted average
+- Apply thresholds (NORMAL/SUSPICIOUS/CRITICAL)
+- Calculate confidence (based on score variance)
+- Return dict with all scores + decision
+- CLI: --tft <float> --cnn <float> --edge <float>
+- Function: def fuse(tft_score, cnn_score, edge_score) -> dict
+- Logging to data/logs/fusion.log
+
+Output format:
+{
+  "tft_score": 0.35,
+  "cnn_score": 0.42,
+  "edge_score": 0.28,
+  "final_score": 0.36,
+  "decision": "NORMAL",
+  "confidence": 0.92,
+  "timestamp": "2026-04-18T10:30:45Z"
+}
+
+TASK 12: api/main.py
+────────────────────
+AGENT: API Agent
+DEPENDENCIES: TASK 1, TASK 8, TASK 9, TASK 10, TASK 11
+PRIORITY: MEDIUM
+DELIVERABLE: api/main.py
+
+Functionality:
+- FastAPI application
+- Load all 3 models on startup (cache in memory)
+- Endpoint: POST /predict
+  - Input: {"vitals": {"heart_rate": float, "temperature": float, "history": [...]}, "image_path": str}
+  - Call tft_model/inference.py
+  - Call cnn_model/inference.py (if image provided)
+  - Call edge_model/isolation_forest.py
+  - Call fusion/fusion_logic.py
+  - Return JSON response
+- Endpoint: GET /health
+  - Check if models loaded
+  - Return status
+- Endpoint: POST /models/reload
+  - Reload models from disk
+- Logging to data/logs/api_requests.log
+- CLI: uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+═════════════════════════════════════════════════════
+PHASE 5: ORCHESTRATION (Depends on all above)
+═════════════════════════════════════════════════════
+
+TASK 13: run_all.py
+───────────────────
+AGENT: Orchestrator Agent
+DEPENDENCIES: ALL TASKS ABOVE
+PRIORITY: LOW
+DELIVERABLE: run_all.py
+
+Functionality:
+- Run all components in sequence or parallel
+- MODES:
+  1. Sequential: run data pipeline → train edge model → start API
+  2. Parallel: train edge model in background, start API
+  3. Inference only: skip training, just start API
+- CLI: --mode sequential|parallel|inference
+- Use subprocess or multiprocessing
+- Logging to data/logs/orchestrator.log
+
+═════════════════════════════════════════════════════
+TASK DEPENDENCY GRAPH
+═════════════════════════════════════════════════════
+
+TASK 1 (config.py) ──┬──► TASK 5 (load_data.py)
+                     │
+TASK 2 (requirements)│
+                     │
+TASK 3 (directories) │
+                     │
+TASK 4 (__init__)    │
+                     │
+                     ├──► TASK 6 (preprocess.py) ──► TASK 7 (save_processed.py)
+                     │                                        │
+                     ├──► TASK 8 (tft inference)             │
+                     │                                        │
+                     ├──► TASK 9 (cnn inference)             │
+                     │                                        │
+                     └──► TASK 10 (edge model) ◄─────────────┘
+                              │
+                              ├──► TASK 11 (fusion)
+                              │
+                              └──► TASK 12 (api)
+                                        │
+                                        └──► TASK 13 (run_all)
+
+═════════════════════════════════════════════════════
+PARALLEL EXECUTION STRATEGY
+═════════════════════════════════════════════════════
+
+WAVE 1 (Start immediately, no dependencies):
+  - TASK 1, 2, 3, 4 (can all run in parallel)
+
+WAVE 2 (After TASK 1 completes):
+  - TASK 5 (data pipeline start)
+  - TASK 8 (tft inference - can start even without data)
+  - TASK 9 (cnn inference - can start even without data)
+  - TASK 11 (fusion - can start even without models)
+
+WAVE 3 (After TASK 5 completes):
+  - TASK 6 (preprocess)
+
+WAVE 4 (After TASK 6 completes):
+  - TASK 7 (save processed)
+
+WAVE 5 (After TASK 7 completes):
+  - TASK 10 (edge model training)
+
+WAVE 6 (After TASK 8, 9, 10, 11 complete):
+  - TASK 12 (api)
+
+WAVE 7 (After TASK 12 completes):
+  - TASK 13 (orchestrator)
+
+ESTIMATED TIME:
+  - WAVE 1: 10 minutes (4 agents in parallel)
+  - WAVE 2: 15 minutes (4 agents in parallel)
+  - WAVE 3: 10 minutes (1 agent)
+  - WAVE 4: 5 minutes (1 agent)
+  - WAVE 5: 20 minutes (1 agent, model training)
+  - WAVE 6: 15 minutes (1 agent)
+  - WAVE 7: 10 minutes (1 agent)
+  - TOTAL: ~85 minutes (with parallelization)
+  - TOTAL: ~150 minutes (without parallelization)
+
+Each folder is owned by a specific agent/module.
+Agents can work in parallel. Each module is fully independent.
+
+project_root/
+│
+├── data_pipeline/          # ═══ AGENT: Data Pipeline ═══
+│   │                       # RESPONSIBILITY: ETL for raw medical data
+│   │                       # INPUT: healthcare_iot_target_dataset.csv (raw)
+│   │                       # OUTPUT: data/processed_vitals.csv
+│   │
+│   ├── __init__.py         # Makes this a Python package
+│   ├── load_data.py        # Load raw PhysioNet/IoMT dataset from CSV/API
+│   │                       # - Read healthcare_iot_target_dataset.csv
+│   │                       # - Validate columns: heart_rate, spo2, temp, bp_sys, bp_dia, timestamp
+│   │                       # - Handle missing values (forward fill for time-series)
+│   │                       # - CLI: --input <path> --output <path>
+│   │
+│   ├── preprocess.py       # Normalize and engineer features
+│   │                       # - Z-score normalization (mean=0, std=1)
+│   │                       # - Create rolling windows (5-min, 15-min averages)
+│   │                       # - Detect outliers (IQR method)
+│   │                       # - Convert to time-series format (timestamp sorted)
+│   │                       # - CLI: --input <path> --output <path>
+│   │
+│   └── save_processed.py   # Save final processed data
+│                           # - Save as data/processed_vitals.csv
+│                           # - Log statistics (mean, std, missing %)
+│                           # - CLI: --input <path> --output <path>
+│
+├── tft_model/              # ═══ AGENT: TFT Model ═══
+│   │                       # RESPONSIBILITY: Time-series forecasting & anomaly detection
+│   │                       # INPUT: data/processed_vitals.csv
+│   │                       # OUTPUT: models/tft_model.pth
+│   │
+│   ├── __init__.py         # Makes this a Python package
+│   ├── dataset.py          # PyTorch Dataset class for TFT
+│   │                       # - TimeSeriesDataset(torch.utils.data.Dataset)
+│   │                       # - Sliding window: 60 timesteps input → 10 timesteps forecast
+│   │                       # - Features: heart_rate, spo2, temp, bp_sys, bp_dia
+│   │                       # - Target: next 10 timesteps of all features
+│   │                       # - Return: (input_tensor, target_tensor, timestamp)
+│   │
+│   ├── train.py            # Train Temporal Fusion Transformer
+│   │                       # - Load data/processed_vitals.csv
+│   │                       # - Split: 70% train, 15% val, 15% test
+│   │                       # - Model: pytorch-forecasting TemporalFusionTransformer
+│   │                       # - Hyperparams: hidden_size=64, attention_heads=4, dropout=0.1
+│   │                       # - Loss: QuantileLoss (for uncertainty estimation)
+│   │                       # - Epochs: 50 (early stopping patience=10)
+│   │                       # - Save: models/tft_model.pth
+│   │                       # - Log: training loss, validation loss, MAE, RMSE
+│   │                       # - CLI: --data <path> --epochs <int> --batch_size <int>
+│   │
+│   └── inference.py        # Load model and predict anomaly score
+│                           # - Load models/tft_model.pth
+│                           # - Input: 60 timesteps of vitals (numpy array or CSV)
+│                           # - Predict: next 10 timesteps
+│                           # - Anomaly score = MAE between predicted vs actual (if available)
+│                           # - If no actual: use prediction uncertainty (quantile range)
+│                           # - Return: float 0.0–1.0 (0=normal, 1=anomaly)
+│                           # - CLI: --model <path> --input <path> --output <path>
+│
+├── cnn_model/              # ═══ AGENT: CNN Model ═══
+│   │                       # RESPONSIBILITY: Image classification for medical imaging
+│   │                       # INPUT: images/ (X-rays, ECG plots, thermal images)
+│   │                       # OUTPUT: models/cnn_model.pth
+│   │
+│   ├── __init__.py         # Makes this a Python package
+│   ├── model.py            # ResNet50 transfer learning definition
+│   │                       # - Load pretrained ResNet50 (ImageNet weights)
+│   │                       # - Replace final FC layer: 1000 → 3 classes (NORMAL, SUSPICIOUS, CRITICAL)
+│   │                       # - Freeze first 3 blocks, fine-tune last 2 blocks
+│   │                       # - Input: 224x224 RGB image
+│   │                       # - Output: 3-class logits
+│   │                       # - Activation: Softmax for probabilities
+│   │
+│   ├── train.py            # Fine-tune on medical images
+│   │                       # - Load images from images/ directory
+│   │                       # - Augmentation: RandomHorizontalFlip, RandomRotation(10°), ColorJitter
+│   │                       # - Split: 80% train, 20% val
+│   │                       # - Loss: CrossEntropyLoss
+│   │                       # - Optimizer: Adam (lr=1e-4)
+│   │                       # - Epochs: 30 (early stopping patience=5)
+│   │                       # - Save: models/cnn_model.pth
+│   │                       # - Log: accuracy, precision, recall, F1-score
+│   │                       # - CLI: --data <image_dir> --epochs <int> --batch_size <int>
+│   │
+│   └── inference.py        # Load model and classify image
+│                           # - Load models/cnn_model.pth
+│                           # - Input: single image path (JPG/PNG)
+│                           # - Preprocess: resize to 224x224, normalize (ImageNet stats)
+│                           # - Predict: class probabilities [p_normal, p_suspicious, p_critical]
+│                           # - Anomaly score = p_suspicious * 0.5 + p_critical * 1.0
+│                           # - Return: float 0.0–1.0
+│                           # - CLI: --model <path> --input <image_path>
+│
+├── edge_model/             # ═══ AGENT: Edge Model ═══
+│   │                       # RESPONSIBILITY: Real-time anomaly detection (lightweight)
+│   │                       # INPUT: data/processed_vitals.csv (for training)
+│   │                       # OUTPUT: models/isolation_forest.pkl
+│   │
+│   ├── __init__.py         # Makes this a Python package
+│   └── isolation_forest.py # Train and infer with Isolation Forest
+│                           # TRAINING MODE:
+│                           # - Load data/processed_vitals.csv
+│                           # - Features: heart_rate, spo2, temp, bp_sys, bp_dia
+│                           # - Model: sklearn.ensemble.IsolationForest
+│                           # - Hyperparams: n_estimators=100, contamination=0.1, max_samples=256
+│                           # - Fit on normal data only (filter out labeled anomalies if available)
+│                           # - Save: models/isolation_forest.pkl
+│                           # - CLI: --data <path> --mode train
+│                           #
+│                           # INFERENCE MODE:
+│                           # - Load models/isolation_forest.pkl
+│                           # - Input: single row of vitals (5 features)
+│                           # - Predict: anomaly score (decision_function output)
+│                           # - Normalize to 0.0–1.0 range
+│                           # - Return: float 0.0–1.0
+│                           # - CLI: --data <path> --mode infer --model <path>
+│
+├── fusion/                 # ═══ AGENT: Fusion Engine ═══
+│   │                       # RESPONSIBILITY: Combine all model outputs into final decision
+│   │                       # INPUT: tft_score, cnn_score, edge_score (floats 0–1)
+│   │                       # OUTPUT: decision (NORMAL/SUSPICIOUS/CRITICAL)
+│   │
+│   ├── __init__.py         # Makes this a Python package
+│   └── fusion_logic.py     # Weighted fusion algorithm
+│                           # FUSION ALGORITHM:
+│                           # - Weighted average: final_score = w1*tft + w2*cnn + w3*edge
+│                           # - Default weights: w1=0.4, w2=0.3, w3=0.3 (configurable in config.py)
+│                           # - Thresholds:
+│                           #     final_score < 0.4   → NORMAL
+│                           #     0.4 ≤ score < 0.7   → SUSPICIOUS
+│                           #     final_score ≥ 0.7   → CRITICAL
+│                           # - Return: dict with all scores + final decision
+│                           # - CLI: --tft <float> --cnn <float> --edge <float>
+│                           # - Function signature:
+│                           #     def fuse(tft_score, cnn_score, edge_score, weights=None):
+│                           #         return {"tft": tft_score, "cnn": cnn_score, "edge": edge_score,
+│                           #                 "final": final_score, "decision": decision}
+│
+├── api/                    # ═══ AGENT: API Server ═══
+│   │                       # RESPONSIBILITY: REST API for real-time predictions
+│   │                       # INPUT: HTTP POST request with vitals + optional image
+│   │                       # OUTPUT: JSON response with fused decision
+│   │
+│   ├── __init__.py         # Makes this a Python package
+│   └── main.py             # FastAPI application
+│                           # ENDPOINTS:
+│                           # 1. POST /predict
+│                           #    - Request body: {"vitals": {...}, "image_path": "..."}
+│                           #    - Load all 3 models (TFT, CNN, Edge)
+│                           #    - Run inference on each model
+│                           #    - Call fusion/fusion_logic.py
+│                           #    - Return JSON response
+│                           # 2. GET /health
+│                           #    - Return {"status": "ok", "models_loaded": true/false}
+│                           # 3. GET /models/reload
+│                           #    - Reload all models from disk
+│                           #
+│                           # STARTUP:
+│                           # - Load models on startup (cache in memory)
+│                           # - Validate models exist, log warnings if missing
+│                           #
+│                           # ERROR HANDLING:
+│                           # - 400 Bad Request: invalid input format
+│                           # - 500 Internal Server Error: model inference failure
+│                           #
+│                           # LOGGING:
+│                           # - Log every request: timestamp, input, output, latency
+│                           #
+│                           # CLI: uvicorn api.main:app --host 0.0.0.0 --port 8000
+│
+├── models/                 # ═══ MODEL ARTIFACTS (created by agents) ═══
+│   ├── tft_model.pth       # TFT PyTorch model (created by tft_model/train.py)
+│   ├── cnn_model.pth       # CNN PyTorch model (created by cnn_model/train.py)
+│   └── isolation_forest.pkl # Isolation Forest sklearn model (created by edge_model/)
+│
+├── data/                   # ═══ DATA ARTIFACTS (created by agents) ═══
+│   ├── processed_vitals.csv # Processed time-series data (created by data_pipeline/)
+│   └── logs/               # Training logs, inference logs
+│
+├── images/                 # ═══ IMAGE DATA (optional, for CNN training) ═══
+│   ├── normal/             # Normal medical images
+│   ├── suspicious/         # Suspicious medical images
+│   └── critical/           # Critical medical images
+│
+├── config.py               # ═══ SHARED CONFIGURATION ═══
+│                           # All agents read from this file. DO NOT HARDCODE VALUES.
+│                           # Contains:
+│                           # - File paths (data/, models/, images/)
+│                           # - Model hyperparameters (epochs, batch_size, learning_rate)
+│                           # - Fusion weights (w1, w2, w3)
+│                           # - Thresholds (normal_threshold, critical_threshold)
+│                           # - Logging config (log level, log file path)
+│                           # - API config (host, port)
+│
+├── requirements.txt        # ═══ PYTHON DEPENDENCIES ═══
+│                           # All packages needed for the project
+│                           # Install: pip install -r requirements.txt
+│
+├── run_all.py              # ═══ ORCHESTRATOR ═══
+│                           # Run all components in sequence or parallel
+│                           # MODES:
+│                           # 1. Sequential: python run_all.py --mode sequential
+│                           #    - Run data_pipeline → train models → start API
+│                           # 2. Parallel: python run_all.py --mode parallel
+│                           #    - Use multiprocessing to train models in parallel
+│                           # 3. Inference only: python run_all.py --mode inference
+│                           #    - Skip training, just start API with existing models
+│
+└── healthcare_iot_target_dataset.csv  # ═══ RAW DATA (provided) ═══
+                            # Original dataset with raw vital signs
+
+# ============================================================
+# DATA FLOW (read this carefully)
+# ============================================================
+
+PHASE 1: DATA PREPARATION
+──────────────────────────
+healthcare_iot_target_dataset.csv (RAW)
+   │
+   ├──► data_pipeline/load_data.py
+   │    - Read CSV
+   │    - Validate schema
+   │    - Handle missing values
+   │    - Output: data/raw_loaded.csv
+   │
+   ├──► data_pipeline/preprocess.py
+   │    - Input: data/raw_loaded.csv
+   │    - Normalize features (Z-score)
+   │    - Create rolling windows
+   │    - Sort by timestamp
+   │    - Output: data/preprocessed.csv
+   │
+   └──► data_pipeline/save_processed.py
+        - Input: data/preprocessed.csv
+        - Final validation
+        - Output: data/processed_vitals.csv ← SHARED ARTIFACT
+
+PHASE 2: MODEL TRAINING (can run in parallel)
+──────────────────────────────────────────────
+data/processed_vitals.csv
+   │
+   ├──► tft_model/train.py
+   │    - Load processed data
+   │    - Create TimeSeriesDataset
+   │    - Train TemporalFusionTransformer
+   │    - Validate on test set
+   │    - Output: models/tft_model.pth ← SHARED ARTIFACT
+   │    - Log: data/logs/tft_training.log
+   │
+   ├──► edge_model/isolation_forest.py --mode train
+   │    - Load processed data
+   │    - Filter normal samples only
+   │    - Train IsolationForest
+   │    - Output: models/isolation_forest.pkl ← SHARED ARTIFACT
+   │    - Log: data/logs/edge_training.log
+   │
+   └──► cnn_model/train.py (if images available)
+        - Load images from images/ directory
+        - Create ImageDataset
+        - Fine-tune ResNet50
+        - Validate on test set
+        - Output: models/cnn_model.pth ← SHARED ARTIFACT
+        - Log: data/logs/cnn_training.log
+
+PHASE 3: INFERENCE (real-time prediction)
+──────────────────────────────────────────
+USER REQUEST → POST /predict
+   │
+   │  Request body:
+   │  {
+   │    "vitals": {
+   │      "heart_rate": 85.0,
+   │      "spo2": 96.0,
+   │      "temperature": 37.2,
+   │      "systolic_bp": 120.0,
+   │      "diastolic_bp": 80.0
+   │    },
+   │    "image_path": "path/to/image.jpg"  // optional
+   │  }
+   │
+   ├──► api/main.py receives request
+   │
+   ├──► tft_model/inference.py
+   │    - Load models/tft_model.pth
+   │    - Input: last 60 timesteps of vitals
+   │    - Predict: next 10 timesteps
+   │    - Calculate anomaly score (MAE or uncertainty)
+   │    - Output: tft_score (float 0.0–1.0)
+   │
+   ├──► cnn_model/inference.py (if image provided)
+   │    - Load models/cnn_model.pth
+   │    - Input: image_path
+   │    - Preprocess image (resize, normalize)
+   │    - Predict: class probabilities
+   │    - Calculate anomaly score
+   │    - Output: cnn_score (float 0.0–1.0)
+   │
+   ├──► edge_model/isolation_forest.py --mode infer
+   │    - Load models/isolation_forest.pkl
+   │    - Input: current vitals (5 features)
+   │    - Predict: anomaly score
+   │    - Normalize to 0–1 range
+   │    - Output: edge_score (float 0.0–1.0)
+   │
+   ├──► fusion/fusion_logic.py
+   │    - Input: tft_score, cnn_score, edge_score
+   │    - Calculate weighted average
+   │    - Apply thresholds
+   │    - Output: {
+   │        "tft_score": 0.35,
+   │        "cnn_score": 0.42,
+   │        "edge_score": 0.28,
+   │        "final_score": 0.36,
+   │        "decision": "NORMAL"
+   │      }
+   │
+   └──► api/main.py returns JSON response
+
+PHASE 4: LOGGING & MONITORING
+──────────────────────────────
+Every component logs to data/logs/:
+   - data/logs/api_requests.log       (all API calls)
+   - data/logs/tft_inference.log      (TFT predictions)
+   - data/logs/cnn_inference.log      (CNN predictions)
+   - data/logs/edge_inference.log     (Edge predictions)
+   - data/logs/fusion.log             (fusion decisions)
+
+# ============================================================
+# SHARED ARTIFACTS (written by one agent, read by others)
+# ============================================================
+
+File/Artifact                     Written By                      Read By                         Format          Size (approx)
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+data/processed_vitals.csv         data_pipeline/save_processed    tft_model, edge_model           CSV             ~10-100 MB
+models/tft_model.pth              tft_model/train.py              tft_model/inference.py, api     PyTorch         ~50-200 MB
+models/cnn_model.pth              cnn_model/train.py              cnn_model/inference.py, api     PyTorch         ~90-100 MB
+models/isolation_forest.pkl       edge_model/isolation_forest     edge_model/inference, api       Pickle          ~1-5 MB
+config.py                         Human/Orchestrator              ALL AGENTS                      Python          ~5 KB
+data/logs/*.log                   ALL AGENTS                      Monitoring tools                Text            Growing
+
+CRITICAL RULES FOR SHARED ARTIFACTS:
+────────────────────────────────────
+1. NEVER modify a shared artifact created by another agent
+2. ALWAYS check if artifact exists before reading (use try/except or os.path.exists)
+3. ALWAYS log when you write a shared artifact
+4. ALWAYS validate artifact format before using it
+5. If artifact is missing, log error and exit gracefully (don't crash)
+6. Use file locks if writing to shared logs (to prevent race conditions)
+
+# ============================================================
+# CLI INTERFACE — every script must support this
+# ============================================================
+
+ALL scripts must accept command-line arguments using argparse.
+ALL scripts must have --help flag that explains usage.
+ALL scripts must validate inputs before processing.
+ALL scripts must log to data/logs/<module_name>.log
+
+DATA PIPELINE:
+──────────────
+python data_pipeline/load_data.py \
+    --input healthcare_iot_target_dataset.csv \
+    --output data/raw_loaded.csv \
+    --log_level INFO
+
+python data_pipeline/preprocess.py \
+    --input data/raw_loaded.csv \
+    --output data/preprocessed.csv \
+    --normalize zscore \
+    --window_size 5
+
+python data_pipeline/save_processed.py \
+    --input data/preprocessed.csv \
+    --output data/processed_vitals.csv \
+    --validate
+
+TFT MODEL:
+──────────
+python tft_model/train.py \
+    --data data/processed_vitals.csv \
+    --output models/tft_model.pth \
+    --epochs 50 \
+    --batch_size 64 \
+    --learning_rate 0.001 \
+    --early_stopping_patience 10 \
+    --hidden_size 64 \
+    --attention_heads 4
+
+python tft_model/inference.py \
+    --model models/tft_model.pth \
+    --input data/sample_vitals.csv \
+    --output predictions.json \
+    --return_uncertainty
+
+CNN MODEL:
+──────────
+python cnn_model/train.py \
+    --data images/ \
+    --output models/cnn_model.pth \
+    --epochs 30 \
+    --batch_size 32 \
+    --learning_rate 0.0001 \
+    --pretrained \
+    --freeze_layers 3
+
+python cnn_model/inference.py \
+    --model models/cnn_model.pth \
+    --input images/test/sample.jpg \
+    --output prediction.json
+
+EDGE MODEL:
+───────────
+# Training mode
+python edge_model/isolation_forest.py \
+    --data data/processed_vitals.csv \
+    --mode train \
+    --output models/isolation_forest.pkl \
+    --n_estimators 100 \
+    --contamination 0.1
+
+# Inference mode
+python edge_model/isolation_forest.py \
+    --data data/sample_vitals.csv \
+    --mode infer \
+    --model models/isolation_forest.pkl \
+    --output prediction.json
+
+FUSION:
+───────
+python fusion/fusion_logic.py \
+    --tft_score 0.35 \
+    --cnn_score 0.42 \
+    --edge_score 0.28 \
+    --weights 0.4,0.3,0.3 \
+    --output decision.json
+
+API:
+────
+# Start server
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Or using Python
+python api/main.py --host 0.0.0.0 --port 8000
+
+ORCHESTRATOR:
+─────────────
+# Run everything sequentially
+python run_all.py --mode sequential
+
+# Run model training in parallel
+python run_all.py --mode parallel --workers 3
+
+# Skip training, just start API
+python run_all.py --mode inference
+
+# Full pipeline with custom config
+python run_all.py --mode sequential --config custom_config.py
+
+# ============================================================
+# FUSION DECISION LOGIC (DETAILED)
+# ============================================================
+
+STEP 1: SCORE NORMALIZATION
+────────────────────────────
+All model outputs must be normalized to [0.0, 1.0] range:
+- 0.0 = completely normal
+- 1.0 = definite anomaly
+
+TFT Score Calculation:
+  - If ground truth available: MAE (Mean Absolute Error) between predicted and actual
+  - If no ground truth: Use prediction uncertainty (quantile range from QuantileLoss)
+  - Normalize: score = min(MAE / threshold, 1.0) where threshold = 10.0
+
+CNN Score Calculation:
+  - Get class probabilities: [p_normal, p_suspicious, p_critical]
+  - score = (0.0 * p_normal) + (0.5 * p_suspicious) + (1.0 * p_critical)
+  - Already in [0.0, 1.0] range
+
+Edge Score Calculation:
+  - IsolationForest returns decision_function (negative = anomaly)
+  - Normalize: score = 1 / (1 + exp(decision_function))  # Sigmoid
+  - Maps to [0.0, 1.0] range
+
+STEP 2: WEIGHTED FUSION
+────────────────────────
+Default weights (configurable in config.py):
+  w_tft = 0.4   # Time-series patterns (most important for vitals)
+  w_cnn = 0.3   # Visual patterns (if image provided)
+  w_edge = 0.3  # Real-time anomaly detection
+
+If no image provided:
+  w_tft = 0.6
+  w_edge = 0.4
+  w_cnn = 0.0
+
+Formula:
+  final_score = (w_tft * tft_score) + (w_cnn * cnn_score) + (w_edge * edge_score)
+
+STEP 3: THRESHOLD APPLICATION
+──────────────────────────────
+Thresholds (configurable in config.py):
+  NORMAL_THRESHOLD = 0.4
+  CRITICAL_THRESHOLD = 0.7
+
+Decision logic:
+  if final_score < NORMAL_THRESHOLD:
+      decision = "NORMAL"
+      action = "No action required"
+      color = "green"
+  
+  elif NORMAL_THRESHOLD <= final_score < CRITICAL_THRESHOLD:
+      decision = "SUSPICIOUS"
+      action = "Monitor closely, notify nurse"
+      color = "yellow"
+  
+  else:  # final_score >= CRITICAL_THRESHOLD
+      decision = "CRITICAL"
+      action = "IMMEDIATE ALERT to doctor"
+      color = "red"
+
+STEP 4: CONFIDENCE CALCULATION
+───────────────────────────────
+Calculate confidence based on score variance:
+  variance = std([tft_score, cnn_score, edge_score])
+  confidence = 1.0 - min(variance * 2, 1.0)
+
+High confidence: all models agree (low variance)
+Low confidence: models disagree (high variance)
+
+STEP 5: OUTPUT FORMAT
+──────────────────────
+Return dictionary:
+{
+  "tft_score": 0.35,
+  "cnn_score": 0.42,
+  "edge_score": 0.28,
+  "final_score": 0.36,
+  "decision": "NORMAL",
+  "confidence": 0.92,
+  "action": "No action required",
+  "timestamp": "2026-04-18T10:30:45Z",
+  "weights_used": {"tft": 0.4, "cnn": 0.3, "edge": 0.3}
+}
+
+# ============================================================
+# API CONTRACT (DETAILED)
+# ============================================================
+
+BASE URL: http://localhost:8000
+PROTOCOL: HTTP/1.1
+CONTENT-TYPE: application/json
+
+═══════════════════════════════════════════════════════════
+ENDPOINT 1: POST /predict
+═══════════════════════════════════════════════════════════
+PURPOSE: Real-time anomaly prediction for patient vitals
+
+REQUEST:
+────────
+Headers:
+  Content-Type: application/json
+  Authorization: Bearer <token>  (optional, for future auth)
+
+Body (JSON):
+{
+  "patient_id": "P12345",           // Optional: patient identifier
+  "timestamp": "2026-04-18T10:30:45Z",  // Optional: ISO 8601 format
+  "vitals": {
+    "heart_rate": 85.0,             // Required: beats per minute (40-200)
+    "spo2": 96.0,                   // Required: oxygen saturation % (70-100)
+    "temperature": 37.2,            // Required: Celsius (35-42)
+    "systolic_bp": 120.0,           // Required: mmHg (70-200)
+    "diastolic_bp": 80.0            // Required: mmHg (40-130)
+  },
+  "image_path": "images/ecg_123.jpg",  // Optional: path to medical image
+  "history": [                      // Optional: last 60 timesteps for TFT
+    {
+      "timestamp": "2026-04-18T10:25:45Z",
+      "heart_rate": 82.0,
+      "spo2": 97.0,
+      "temperature": 37.1,
+      "systolic_bp": 118.0,
+      "diastolic_bp": 78.0
+    },
+    // ... up to 60 previous readings
+  ]
+}
+
+RESPONSE (Success - 200 OK):
+────────────────────────────
+{
+  "status": "success",
+  "patient_id": "P12345",
+  "timestamp": "2026-04-18T10:30:45Z",
+  "scores": {
+    "tft_score": 0.35,              // TFT model output [0.0-1.0]
+    "cnn_score": 0.42,              // CNN model output [0.0-1.0]
+    "edge_score": 0.28,             // Edge model output [0.0-1.0]
+    "final_score": 0.36             // Weighted fusion result [0.0-1.0]
+  },
+  "decision": "NORMAL",             // NORMAL | SUSPICIOUS | CRITICAL
+  "confidence": 0.92,               // Confidence level [0.0-1.0]
+  "action": "No action required",   // Recommended action
+  "weights_used": {
+    "tft": 0.4,
+    "cnn": 0.3,
+    "edge": 0.3
+  },
+  "inference_time_ms": 45.2,        // Total inference latency
+  "model_versions": {
+    "tft": "v1.0.0",
+    "cnn": "v1.0.0",
+    "edge": "v1.0.0"
+  }
+}
+
+RESPONSE (Error - 400 Bad Request):
+────────────────────────────────────
+{
+  "status": "error",
+  "error_code": "INVALID_INPUT",
+  "message": "Missing required field: vitals.heart_rate",
+  "details": {
+    "field": "vitals.heart_rate",
+    "expected": "float (40-200)",
+    "received": null
+  }
+}
+
+RESPONSE (Error - 500 Internal Server Error):
+──────────────────────────────────────────────
+{
+  "status": "error",
+  "error_code": "MODEL_INFERENCE_FAILED",
+  "message": "TFT model inference failed",
+  "details": {
+    "model": "tft",
+    "error": "Model file not found: models/tft_model.pth"
+  }
+}
+
+═══════════════════════════════════════════════════════════
+ENDPOINT 2: GET /health
+═══════════════════════════════════════════════════════════
+PURPOSE: Check API and model health status
+
+RESPONSE (200 OK):
+──────────────────
+{
+  "status": "healthy",
+  "timestamp": "2026-04-18T10:30:45Z",
+  "models": {
+    "tft": {
+      "loaded": true,
+      "path": "models/tft_model.pth",
+      "size_mb": 52.3,
+      "last_loaded": "2026-04-18T09:00:00Z"
+    },
+    "cnn": {
+      "loaded": true,
+      "path": "models/cnn_model.pth",
+      "size_mb": 97.8,
+      "last_loaded": "2026-04-18T09:00:00Z"
+    },
+    "edge": {
+      "loaded": true,
+      "path": "models/isolation_forest.pkl",
+      "size_mb": 2.1,
+      "last_loaded": "2026-04-18T09:00:00Z"
+    }
+  },
+  "uptime_seconds": 3645,
+  "total_requests": 1523,
+  "avg_latency_ms": 42.7
+}
+
+═══════════════════════════════════════════════════════════
+ENDPOINT 3: POST /models/reload
+═══════════════════════════════════════════════════════════
+PURPOSE: Reload all models from disk (for hot-swapping)
+
+RESPONSE (200 OK):
+──────────────────
+{
+  "status": "success",
+  "message": "All models reloaded successfully",
+  "models_reloaded": ["tft", "cnn", "edge"],
+  "timestamp": "2026-04-18T10:30:45Z"
+}
+
+═══════════════════════════════════════════════════════════
+ENDPOINT 4: GET /metrics
+═══════════════════════════════════════════════════════════
+PURPOSE: Prometheus-compatible metrics for monitoring
+
+RESPONSE (200 OK, text/plain):
+───────────────────────────────
+# HELP api_requests_total Total number of API requests
+# TYPE api_requests_total counter
+api_requests_total{endpoint="/predict",status="success"} 1450
+api_requests_total{endpoint="/predict",status="error"} 73
+
+# HELP api_latency_seconds API request latency
+# TYPE api_latency_seconds histogram
+api_latency_seconds_bucket{le="0.05"} 1200
+api_latency_seconds_bucket{le="0.1"} 1480
+api_latency_seconds_bucket{le="0.5"} 1523
+
+# HELP model_inference_time_seconds Model inference time
+# TYPE model_inference_time_seconds histogram
+model_inference_time_seconds{model="tft"} 0.025
+model_inference_time_seconds{model="cnn"} 0.015
+model_inference_time_seconds{model="edge"} 0.005
+
+# ============================================================
+# ENVIRONMENT & DEPENDENCIES
+# ============================================================
+
+PYTHON VERSION: 3.10+ (tested on 3.10, 3.11, 3.12)
+VIRTUAL ENV: ./venv (already created)
+
+ACTIVATION:
+───────────
+Windows:   venv\Scripts\activate
+Linux/Mac: source venv/bin/activate
+
+INSTALLATION:
+─────────────
+pip install -r requirements.txt
+
+KEY PACKAGES (to be in requirements.txt):
+──────────────────────────────────────────
+
+# Deep Learning
+torch==2.1.0                    # PyTorch for TFT and CNN
+torchvision==0.16.0             # For ResNet50 and image transforms
+pytorch-forecasting==1.0.0      # Temporal Fusion Transformer
+pytorch-lightning==2.1.0        # Training framework for TFT
+
+# Machine Learning
+scikit-learn==1.3.2             # Isolation Forest
+numpy==1.24.3                   # Numerical operations
+pandas==2.1.3                   # Data manipulation
+
+# API & Web
+fastapi==0.104.1                # REST API framework
+uvicorn[standard]==0.24.0       # ASGI server
+python-multipart==0.0.6         # File upload support
+pydantic==2.5.0                 # Data validation
+
+# Image Processing
+Pillow==10.1.0                  # Image loading and preprocessing
+
+# Utilities
+python-dotenv==1.0.0            # Environment variables
+pyyaml==6.0.1                   # Config file parsing
+tqdm==4.66.1                    # Progress bars
+kaggle==1.5.16                  # Kaggle dataset download
+
+# Logging & Monitoring
+loguru==0.7.2                   # Better logging
+prometheus-client==0.19.0       # Metrics export
+
+# Testing (optional)
+pytest==7.4.3
+pytest-cov==4.1.0
+
+HARDWARE REQUIREMENTS:
+──────────────────────
+Training (Kaggle/Local):
+  - GPU: NVIDIA GPU with 8GB+ VRAM (Tesla T4, RTX 3060+)
+  - RAM: 16GB+
+  - Storage: 10GB+ free space
+
+Inference (Local/Edge):
+  - CPU: 4+ cores (Intel i5/AMD Ryzen 5+)
+  - RAM: 8GB+
+  - Storage: 5GB+ free space
+  - GPU: Optional (speeds up inference 3-5x)
+
+DEPLOYMENT ENVIRONMENTS:
+────────────────────────
+1. Kaggle (Training):
+   - Free GPU: Tesla P100 (16GB VRAM)
+   - 30 hours/week GPU quota
+   - Upload code as Kaggle notebook or script
+
+2. Local Machine (Development):
+   - Windows/Linux/Mac
+   - Python 3.10+ with venv
+   - Optional: CUDA 11.8+ for GPU support
+
+3. Edge Device (Production):
+   - Raspberry Pi 4 (8GB) or similar
+   - ARM64 or x86_64 architecture
+   - Use quantized models for faster inference
+
+# ------------------------------------------------------------
+# AGENT RULES
+# ------------------------------------------------------------
+
+1. Do NOT modify config.py without checking with the orchestrator.
+2. Do NOT hardcode paths — always use config.py values or CLI args.
+3. Every script must have a logger (use Python's logging module).
+4. Save all model artifacts to the models/ directory.
+5. Save all processed data to the data/ directory.
+6. Do NOT start training until the dataset is confirmed ready.
+7. Each agent works only in its own folder unless reading shared artifacts.
+8. Keep functions small and single-purpose.
+9. No unnecessary dependencies — use what's already in requirements.txt.
+10. When in doubt, read config.py first.
+
+# ------------------------------------------------------------
+# CURRENT STATUS
+# ------------------------------------------------------------
+
+[x] Folder structure created
+[x] .init file written
+[ ] config.py — pending
+[ ] requirements.txt — pending
+[ ] data_pipeline/ — pending
+[ ] tft_model/ — pending (waiting for trained model)
+[ ] cnn_model/ — pending (waiting for trained model)
+[ ] edge_model/ — pending
+[ ] fusion/ — pending
+[ ] api/ — pending
+[ ] run_all.py — pending
+
+# ============================================================
+# END OF INIT FILE
+# ============================================================
+
+
+# ============================================================
+# FOLDER STRUCTURE & FILE DESCRIPTIONS
+# ============================================================
+
+project_root/
+│
+├── data_pipeline/
+│   ├── __init__.py
+│   ├── load_data.py          [TASK 5]
+│   ├── preprocess.py         [TASK 6]
+│   └── save_processed.py     [TASK 7]
+│
+├── tft_model/
+│   ├── __init__.py
+│   └── inference.py          [TASK 8]
+│
+├── cnn_model/
+│   ├── __init__.py
+│   └── inference.py          [TASK 9]
+│
+├── edge_model/
+│   ├── __init__.py
+│   └── isolation_forest.py   [TASK 10]
+│
+├── fusion/
+│   ├── __init__.py
+│   └── fusion_logic.py       [TASK 11]
+│
+├── api/
+│   ├── __init__.py
+│   └── main.py               [TASK 12]
+│
+├── models/                   [Created by agents during training]
+│   ├── tft_model.pth         [Provided from Kaggle later]
+│   ├── cnn_model.pth         [Provided from Kaggle later]
+│   ├── isolation_forest.pkl  [Created by TASK 10]
+│   └── scaler.pkl            [Created by TASK 10]
+│
+├── data/                     [TASK 3]
+│   ├── raw_loaded.csv        [Created by TASK 5]
+│   ├── preprocessed.csv      [Created by TASK 6]
+│   ├── processed_vitals.csv  [Created by TASK 7] ← SHARED ARTIFACT
+│   └── logs/                 [TASK 3]
+│       ├── data_pipeline.log
+│       ├── tft_inference.log
+│       ├── cnn_inference.log
+│       ├── edge_training.log
+│       ├── edge_inference.log
+│       ├── fusion.log
+│       ├── api_requests.log
+│       └── orchestrator.log
+│
+├── images/                   [Optional, for CNN input]
+│
+├── config.py                 [TASK 1] ← CRITICAL, READ FIRST
+├── requirements.txt          [TASK 2]
+├── run_all.py                [TASK 13]
+├── healthcare_iot_target_dataset.csv  [Raw data, already exists]
+└── .init                     [This file]
+
+# ============================================================
+# CRITICAL RULES FOR ALL AGENTS
+# ============================================================
+
+1. READ config.py FIRST before writing any code
+2. DO NOT hardcode paths — always use config.py or CLI args
+3. ALWAYS log to data/logs/<module_name>.log using Python logging
+4. ALWAYS validate inputs before processing (check file exists, correct shape, etc.)
+5. ALWAYS handle errors gracefully (try/except, log error, exit with code 1)
+6. DO NOT modify shared artifacts created by other agents
+7. ALWAYS check if shared artifact exists before reading
+8. Use argparse for CLI arguments (--help flag required)
+9. Keep functions small and single-purpose
+10. Add docstrings to all functions
+11. Use type hints (def func(x: float) -> float:)
+12. Save models/artifacts atomically (write to temp file, then rename)
+13. Use file locks if writing to shared logs
+14. Test your code with sample data before marking task complete
+15. Log when you START and FINISH each operation
+
+# ============================================================
+# LOGGING STANDARD (ALL AGENTS MUST FOLLOW)
+# ============================================================
+
+Use Python's logging module:
+
+import logging
+import sys
+
+# Setup logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# File handler
+fh = logging.FileHandler('data/logs/<module_name>.log')
+fh.setLevel(logging.INFO)
+
+# Console handler
+ch = logging.StreamHandler(sys.stdout)
+ch.setLevel(logging.INFO)
+
+# Formatter
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+ch.setFormatter(formatter)
+
+logger.addHandler(fh)
+logger.addHandler(ch)
+
+# Usage
+logger.info("Starting data loading...")
+logger.error("Failed to load file: %s", filepath)
+
+# ============================================================
+# DATA FORMAT SPECIFICATIONS
+# ============================================================
+
+RAW DATA (healthcare_iot_target_dataset.csv):
+──────────────────────────────────────────────
+Columns: timestamp, heart_rate, temperature, [other columns ignored]
+Format: CSV with header
+Example:
+  timestamp,heart_rate,temperature,spo2,bp_sys,bp_dia
+  2026-04-18T10:00:00Z,75.0,36.8,98.0,120.0,80.0
+  2026-04-18T10:01:00Z,76.0,36.9,97.0,121.0,81.0
+
+PROCESSED DATA (data/processed_vitals.csv):
+───────────────────────────────────────────
+Columns: timestamp, heart_rate_norm, temperature_norm
+Format: CSV with header
+Normalization: Z-score (mean=0, std=1)
+Example:
+  timestamp,heart_rate_norm,temperature_norm
+  2026-04-18T10:00:00Z,-0.523,0.234
+  2026-04-18T10:01:00Z,-0.412,0.345
+
+TFT INPUT (for inference):
+──────────────────────────
+Format: CSV with 30 rows (last 30 timesteps)
+Columns: heart_rate_norm, temperature_norm
+Example:
+  heart_rate_norm,temperature_norm
+  -0.523,0.234
+  -0.412,0.345
+  ... (28 more rows)
+
+EDGE MODEL INPUT (for inference):
+──────────────────────────────────
+Format: Single row CSV or JSON
+Example CSV:
+  heart_rate,temperature
+  75.0,36.8
+
+Example JSON:
+  {"heart_rate": 75.0, "temperature": 36.8}
+
+# ============================================================
+# ERROR HANDLING STANDARD
+# ============================================================
+
+ALL scripts must handle these errors:
+
+1. File not found:
+   if not os.path.exists(filepath):
+       logger.error(f"File not found: {filepath}")
+       sys.exit(1)
+
+2. Invalid input shape:
+   if data.shape != expected_shape:
+       logger.error(f"Invalid shape: {data.shape}, expected: {expected_shape}")
+       sys.exit(1)
+
+3. Model not found:
+   try:
+       model = torch.load(model_path)
+   except FileNotFoundError:
+       logger.error(f"Model not found: {model_path}")
+       logger.info("Please provide the model file from Kaggle training")
+       sys.exit(1)
+
+4. Invalid input values:
+   if heart_rate < 40 or heart_rate > 200:
+       logger.warning(f"Heart rate out of range: {heart_rate}")
+
+# ============================================================
+# TESTING CHECKLIST (before marking task complete)
+# ============================================================
+
+For each task, test:
+
+1. CLI help works:
+   python <script>.py --help
+
+2. Required arguments validated:
+   python <script>.py  # should show error
+
+3. File not found handled:
+   python <script>.py --input nonexistent.csv  # should log error and exit
+
+4. Valid input produces output:
+   python <script>.py --input <valid_file> --output <output_file>
+   # Check output file exists and has correct format
+
+5. Logging works:
+   # Check data/logs/<module>.log has entries
+
+6. Function can be imported:
+   from module import function
+   result = function(test_input)
+   assert result is not None
+
+# ============================================================
+# CURRENT STATUS CHECKLIST
+# ============================================================
+
+PHASE 1: FOUNDATION
+[ ] TASK 1: config.py
+[ ] TASK 2: requirements.txt
+[ ] TASK 3: directory structure
+[ ] TASK 4: __init__.py files
+
+PHASE 2: DATA PIPELINE
+[ ] TASK 5: data_pipeline/load_data.py
+[ ] TASK 6: data_pipeline/preprocess.py
+[ ] TASK 7: data_pipeline/save_processed.py
+
+PHASE 3: MODEL INFERENCE
+[ ] TASK 8: tft_model/inference.py
+[ ] TASK 9: cnn_model/inference.py
+[ ] TASK 10: edge_model/isolation_forest.py
+
+PHASE 4: FUSION & API
+[ ] TASK 11: fusion/fusion_logic.py
+[ ] TASK 12: api/main.py
+
+PHASE 5: ORCHESTRATION
+[ ] TASK 13: run_all.py
+
+MODELS (from Kaggle):
+[ ] models/tft_model.pth (waiting)
+[ ] models/cnn_model.pth (waiting)
+
+# ============================================================
+# AGENT COMMUNICATION PROTOCOL
+# ============================================================
+
+When starting a task:
+1. Claim the task by logging: "AGENT_NAME claiming TASK_X"
+2. Check dependencies are complete
+3. Read config.py
+4. Write code
+5. Test with sample data
+6. Mark task complete: "AGENT_NAME completed TASK_X"
+
+When blocked:
+1. Log: "AGENT_NAME blocked on TASK_X, waiting for TASK_Y"
+2. Move to another task if possible
+
+When sharing artifacts:
+1. Log: "AGENT_NAME created ARTIFACT_NAME at PATH"
+2. Validate artifact before marking complete
+
+# ============================================================
+# END OF INIT FILE
+# ============================================================

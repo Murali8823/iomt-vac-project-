@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoMT Device Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            color: #00d9ff;
+        }
+
+        .system-status {
+            display: flex;
+            gap: 15px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #2a2a3e;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #555;
+        }
+
+        .status-dot.ready {
+            background: #00ff88;
+            box-shadow: 0 0 8px #00ff88;
+        }
+
+        .status-dot.not-ready {
+            background: #ff4466;
+            box-shadow: 0 0 8px #ff4466;
+        }
+
+        .last-updated {
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #2a2a3e;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 12px 10px;
+            text-align: left;
+            border-bottom: 1px solid #3a3a4e;
+        }
+
+        th {
+            background: #16213e;
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #00d9ff;
+        }
+
+        tr:hover {
+            background: #3a3a4e;
+        }
+
+        .status-normal {
+            background: rgba(0, 255, 136, 0.15);
+            color: #00ff88;
+        }
+
+        .status-suspicious {
+            background: rgba(255, 187, 51, 0.15);
+            color: #ffbb33;
+        }
+
+        .status-critical {
+            background: rgba(255, 68, 102, 0.15);
+            color: #ff4466;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #ff4466;
+            background: rgba(255, 68, 102, 0.1);
+            border-radius: 8px;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .refreshing {
+            animation: pulse 1s ease-in-out;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>IoMT Device Dashboard</h1>
+            <div>
+                <div class="system-status">
+                    <div class="status-indicator">
+                        <div class="status-dot" id="edge-status"></div>
+                        <span>Edge</span>
+                    </div>
+                    <div class="status-indicator">
+                        <div class="status-dot" id="cnn-status"></div>
+                        <span>CNN</span>
+                    </div>
+                    <div class="status-indicator">
+                        <div class="status-dot" id="tft-status"></div>
+                        <span>TFT</span>
+                    </div>
+                </div>
+                <div class="last-updated" id="last-updated">Last updated: --</div>
+            </div>
+        </header>
+
+        <div id="dashboard-content">
+            <div class="loading">Loading devices...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        const REFRESH_INTERVAL = 3000;
+
+        function getStatusClass(value, type = 'default') {
+            if (value === null || value === undefined) return 'status-suspicious';
+
+            if (type === 'decision') {
+                if (value === 'normal') return 'status-normal';
+                if (value === 'suspicious') return 'status-suspicious';
+                if (value === 'critical') return 'status-critical';
+            }
+
+            if (type === 'boolean') {
+                return value ? 'status-normal' : 'status-critical';
+            }
+
+            if (type === 'anomaly') {
+                return value ? 'status-critical' : 'status-normal';
+            }
+
+            // Numeric thresholds for vitals
+            const num = parseFloat(value);
+            if (isNaN(num)) return 'status-suspicious';
+
+            // Heart rate: 60-100 normal
+            if (type === 'hr') {
+                if (num < 50 || num > 120) return 'status-critical';
+                if (num < 60 || num > 100) return 'status-suspicious';
+                return 'status-normal';
+            }
+
+            // Temperature: 36-37.5 normal
+            if (type === 'temp') {
+                if (num < 35 || num > 39) return 'status-critical';
+                if (num < 36 || num > 37.5) return 'status-suspicious';
+                return 'status-normal';
+            }
+
+            // Resp rate: 12-20 normal
+            if (type === 'resp') {
+                if (num < 10 || num > 30) return 'status-critical';
+                if (num < 12 || num > 20) return 'status-suspicious';
+                return 'status-normal';
+            }
+
+            return 'status-suspicious';
+        }
+
+        function formatValue(value, type = 'default') {
+            if (value === null || value === undefined) return '--';
+            if (type === 'boolean') return value ? 'Active' : 'Inactive';
+            if (type === 'anomaly') return value ? 'Detected' : 'Normal';
+            return String(value);
+        }
+
+        function updateSystemStatus(projectStatus) {
+            document.getElementById('edge-status').className =
+                'status-dot ' + (projectStatus.edgeReady ? 'ready' : 'not-ready');
+            document.getElementById('cnn-status').className =
+                'status-dot ' + (projectStatus.cnnReady ? 'ready' : 'not-ready');
+            document.getElementById('tft-status').className =
+                'status-dot ' + (projectStatus.tftReady ? 'ready' : 'not-ready');
+        }
+
+        function renderDevices(devices) {
+            const container = document.getElementById('dashboard-content');
+
+            if (!devices || devices.length === 0) {
+                container.innerHTML = '<div class="error">No devices found</div>';
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Device ID</th>
+                        <th>Heart Rate</th>
+                        <th>Temp (°C)</th>
+                        <th>Resp Rate</th>
+                        <th>Edge Status</th>
+                        <th>TFT Anomaly</th>
+                        <th>CNN Result</th>
+                        <th>Final Decision</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${devices.map(device => `
+                        <tr>
+                            <td><strong>${device.deviceId || device.device_id || '--'}</strong></td>
+                            <td class="${getStatusClass(device.heartRate ?? device.heart_rate, 'hr')}">
+                                <span class="badge">${formatValue(device.heartRate ?? device.heart_rate)}</span>
+                            </td>
+                            <td class="${getStatusClass(device.temperature ?? device.temp ?? device.temperature_c, 'temp')}">
+                                <span class="badge">${formatValue(device.temperature ?? device.temp ?? device.temperature_c)}</span>
+                            </td>
+                            <td class="${getStatusClass(device.respRate ?? device.resp_rate, 'resp')}">
+                                <span class="badge">${formatValue(device.respRate ?? device.resp_rate)}</span>
+                            </td>
+                            <td class="${getStatusClass(device.edgeStatus ?? device.edge_status, 'boolean')}">
+                                <span class="badge">${formatValue(device.edgeStatus ?? device.edge_status, 'boolean')}</span>
+                            </td>
+                            <td class="${getStatusClass(device.tftAnomaly ?? device.tft_anomaly, 'anomaly')}">
+                                <span class="badge">${formatValue(device.tftAnomaly ?? device.tft_anomaly, 'anomaly')}</span>
+                            </td>
+                            <td class="${getStatusClass(device.cnnResult ?? device.cnn_result)}">
+                                <span class="badge">${formatValue(device.cnnResult ?? device.cnn_result)}</span>
+                            </td>
+                            <td class="${getStatusClass(device.finalDecision ?? device.final_decision, 'decision')}">
+                                <span class="badge">${formatValue(device.finalDecision ?? device.final_decision)}</span>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+
+            container.innerHTML = '';
+            container.appendChild(table);
+        }
+
+        async function fetchProjectStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/project_status.json`);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateSystemStatus(data);
+                }
+            } catch (e) {
+                console.log('Could not fetch project status');
+            }
+        }
+
+        async function fetchDevices() {
+            const container = document.getElementById('dashboard-content');
+            container.classList.add('refreshing');
+
+            try {
+                const response = await fetch(`${API_BASE}/devices`);
+                if (!response.ok) throw new Error('Failed to fetch');
+
+                const data = await response.json();
+                const devices = Array.isArray(data) ? data : (data.devices || []);
+
+                renderDevices(devices);
+                document.getElementById('last-updated').textContent =
+                    `Last updated: ${new Date().toLocaleTimeString()}`;
+            } catch (error) {
+                container.innerHTML = `<div class="error">Error loading devices: ${error.message}</div>`;
+            } finally {
+                setTimeout(() => container.classList.remove('refreshing'), 1000);
+            }
+        }
+
+        function init() {
+            fetchProjectStatus();
+            fetchDevices();
+
+            setInterval(() => {
+                fetchDevices();
+                fetchProjectStatus();
+            }, REFRESH_INTERVAL);
+        }
+
+        init();
+    </script>
+</body>
+</html>
