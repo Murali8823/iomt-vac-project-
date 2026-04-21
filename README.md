@@ -12,10 +12,11 @@
 1. [System Architecture](#-system-architecture)
 2. [Deep Dive: The Tri-Model AI Engine](#-deep-dive-the-tri-model-ai-engine)
 3. [Data Engineering & Pipeline](#-data-engineering--pipeline)
-4. [API Specification](#-api-specification)
-5. [Frontend & Real-Time Visualization](#-frontend--real-time-visualization)
-6. [Deployment & Scaling](#-deployment--scaling)
-7. [Research & Mathematical Foundation](#-research--mathematical-foundation)
+4. [How to Use & Quick Start](#-how-to-use--quick-start)
+5. [API Specification](#-api-specification)
+6. [Frontend & Real-Time Visualization](#-frontend--real-time-visualization)
+7. [Deployment & Scaling](#-deployment--scaling)
+8. [Research & Mathematical Foundation](#-research--mathematical-foundation)
 
 ---
 
@@ -65,6 +66,33 @@ VitalGuard's robustness comes from its data treatment. The system utilizes `Data
 -   **Normalization:** Vitals are scaled using `StandardScaler` to ensure the CNN and TFT models don't over-index on high-magnitude numbers (like Heart Rate vs. Temperature).
 -   **Windowing:** Data is transformed into sliding windows of 10-50 time steps for the TFT model.
 -   **Synthetic Generation:** The `Simulator` uses Gaussian noise and trend-injection to mimic real-world sensor jitter and medical emergencies.
+
+---
+
+## 🛠️ How to Use & Quick Start
+
+### 1. Start the AI Backend
+Launch the FastAPI server which orchestrates the AI models and the IoT simulation:
+```bash
+python backend/main.py
+```
+*The server will start at `http://localhost:8000`.*
+
+### 2. Access the Real-Time Dashboard
+The dashboard is a static web interface that polls the backend. You can open it directly in your browser:
+-   **Path:** `frontend/dashboard.html`
+-   **Action:** Double-click the file or serve it via a local web server.
+-   **Interaction:** Once open, you will see 20 device cards. If a patient's vitals become abnormal, the card will turn **Red** and move to the top of the list for immediate triage.
+
+### 3. Explore the API (Swagger UI)
+VitalGuard provides a fully interactive API documentation page:
+-   **URL:** [http://localhost:8000/docs](http://localhost:8000/docs)
+-   **Usage:** You can test individual model inferences, manually trigger simulations, or check system health directly from the browser.
+
+### 4. Running a Diagnostic Check
+If you want to manually verify the CNN or TFT services:
+-   Use the `/diagnostics/{device_id}` endpoint in Swagger.
+-   The system will return a JSON payload containing the individual confidence scores of all three models.
 
 ---
 
