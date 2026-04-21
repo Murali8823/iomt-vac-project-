@@ -1,5 +1,7 @@
 {
   "backend_ready": true,
+  "cnn_ready": true,
   "edge_ready": true,
+  "tft_ready": true,
   "simulation_ready": true
 }
